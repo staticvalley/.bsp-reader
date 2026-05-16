@@ -1,6 +1,7 @@
 #include <BSPFile.hpp>
 
 #include <string>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <print>
@@ -12,18 +13,21 @@ BSPFile::BSPFile() {}
 BSPFile::~BSPFile() {}
 
 bool BSPFile::load(const char* path) {
-	
+
 	// open .bsp
 	std::ifstream fileStream = std::ifstream(path, std::ios::binary);
-	if (!fileStream.is_open())
+	if (!fileStream.is_open()) {
+		std::println(std::cerr, "BSPFile: could not open \"{}\"", path);
 		return false;
+	}
 
 	// read header and each lump
 	try {
 		processHeader(fileStream);
-		for(int i = 0; i < BSP_LUMP_COUNT; i++)
+		for (int i = 0; i < BSP_LUMP_COUNT; i++)
 			processLump(fileStream, LumpType(i));
-	} catch (const std::runtime_error& e) {
+	}
+	catch (const std::runtime_error& e) {
 		std::println(std::cerr, "BSPFile: failed to load {}: {}", path, e.what());
 		return false;
 	}
@@ -45,35 +49,39 @@ void BSPFile::processHeader(std::ifstream& fileStream) {
 	fileStream.read((char*)(newHeader.lump), sizeof(BSPLump) * BSP_LUMP_COUNT);
 	if (!fileStream)
 		throw std::runtime_error("failed to read header lump information");
-	
+
 	header = std::move(newHeader);
 }
 
 void BSPFile::processLump(std::ifstream& fileStream, LumpType lump) {
 	switch (lump) {
-	case ENTITIES:		_entities		= processEntityLump(fileStream); break;
-	case PLANES:		_planes			= processBinaryLump<BSPPlane>(fileStream, lump); break;
-	case TEXTURES:		_textures		= processTextureLump(fileStream); break;
-	case VERTICES:		_vertices		= processBinaryLump<BSPVertex>(fileStream, lump); break;
+	case ENTITIES:		_entities = processEntityLump(fileStream); break;
+	case PLANES:		_planes = processBinaryLump<BSPPlane>(fileStream, lump); break;
+	case TEXTURES:		_textures = processTextureLump(fileStream); break;
+	case VERTICES:		_vertices = processBinaryLump<BSPVertex>(fileStream, lump); break;
 	case VISIBILITY:	break;			// note: unimplemented
-	case NODES:			_nodes			= processBinaryLump<BSPNode>(fileStream, lump); break;
-	case TEXINFO:		_textureInfo	= processBinaryLump<BSPTextureInfo>(fileStream, lump); break;
-	case FACES:			_faces			= processBinaryLump<BSPFace>(fileStream, lump); break;
-	case LIGHTING:		_lightMap		= processBinaryLump<uint8_t>(fileStream, lump); break;
-	case CLIPNODES:		_clipNodes		= processBinaryLump<BSPClipNode>(fileStream, lump); break;
-	case LEAVES:		_leaves			= processBinaryLump<BSPLeaf>(fileStream, lump); break;
-	case MARKSURFACES:	_markSurfaces	= processBinaryLump<BSPMarkSurface>(fileStream, lump); break;
-	case EDGES:			_edges			= processBinaryLump<BSPEdge>(fileStream, lump); break;
-	case SURFEDGES:		_surfEdges		= processBinaryLump<BSPSurfEdge>(fileStream, lump); break;
-	case MODELS:		_models			= processBinaryLump<BSPModel>(fileStream, lump); break;
+	case NODES:			_nodes = processBinaryLump<BSPNode>(fileStream, lump); break;
+	case TEXINFO:		_textureInfo = processBinaryLump<BSPTextureInfo>(fileStream, lump); break;
+	case FACES:			_faces = processBinaryLump<BSPFace>(fileStream, lump); break;
+	case LIGHTING:		_lightMap = processBinaryLump<uint8_t>(fileStream, lump); break;
+	case CLIPNODES:		_clipNodes = processBinaryLump<BSPClipNode>(fileStream, lump); break;
+	case LEAVES:		_leaves = processBinaryLump<BSPLeaf>(fileStream, lump); break;
+	case MARKSURFACES:	_markSurfaces = processBinaryLump<BSPMarkSurface>(fileStream, lump); break;
+	case EDGES:			_edges = processBinaryLump<BSPEdge>(fileStream, lump); break;
+	case SURFEDGES:		_surfEdges = processBinaryLump<BSPSurfEdge>(fileStream, lump); break;
+	case MODELS:		_models = processBinaryLump<BSPModel>(fileStream, lump); break;
 	default:			break;
 	}
 }
 
 std::vector<std::string> BSPFile::requiredWADs() {
-	
+
+	const auto getFileName = [](const std::string& s) -> std::string {
+		return std::filesystem::path(s).filename().string();
+		};
+
 	// make a vector of split strings from a string at the delimiter
-	const auto split = [](const std::string& s, const std::string& delim) -> std::vector<std::string> {
+	const auto split = [&](const std::string& s, const std::string& delim) -> std::vector<std::string> {
 		size_t start = 0;
 		size_t end;
 		const size_t delim_length = delim.length();
@@ -82,19 +90,27 @@ std::vector<std::string> BSPFile::requiredWADs() {
 		std::vector<std::string> splitResults;
 
 		while ((end = s.find(delim, start)) != std::string::npos) {
-			token = s.substr(start, end - start);
+			token = getFileName(s.substr(start, end - start));
 			start = end + delim_length;
 			splitResults.push_back(token);
 		}
 
-		splitResults.push_back(s.substr(start));
+		splitResults.push_back(getFileName(s.substr(start)));
 		return splitResults;
-	};
+		};
+
+	const auto clearEmptyFilenames = [](std::vector<std::string>& vs) {
+		std::erase_if(vs, [](const std::string& s) { return s.empty(); });
+		};
 
 	for (const BSPEntity& entity : _entities) {
-		if (entity.count("classname") && entity["classname"] == "worldspawn")
-			if (entity.count("wad"))
-				return split(entity["wad"], ";");
+		if (entity.count("classname") && entity.at("classname") == "worldspawn")
+			if (entity.count("wad")) {
+				// get wad file paths
+				std::vector<std::string>wads = split(entity.at("wad"), ";");
+				clearEmptyFilenames(wads);
+				return wads;
+			}
 	}
 
 	// worldspawn not found
@@ -119,7 +135,7 @@ std::vector<BSPEntity> BSPFile::processEntityLump(std::ifstream& fileStream) {
 }
 
 std::vector<BSPEntity> BSPFile::parseEntityMapPairs(std::string_view blob) {
-	
+
 	std::vector<BSPEntity> processedEntities;
 	BSPEntity currentEntity;
 	uint32_t index = 0;
@@ -128,12 +144,12 @@ std::vector<BSPEntity> BSPFile::parseEntityMapPairs(std::string_view blob) {
 	// define lambda functions for reading in hashmap pairs
 	auto skipWhitespace = [&]() {
 		while (index < blob.size() && std::isspace(blob[index])) index++;
-	};
+		};
 
 	// reads string within quotes, ie "class_name" would return class_name
 	auto readQuotes = [&]() -> std::string {
 		// skip first quote
-		index++; 
+		index++;
 		uint32_t beggining = index;
 		// read string
 		while (index < blob.size() && blob[index] != '"') index++;
@@ -141,35 +157,35 @@ std::vector<BSPEntity> BSPFile::parseEntityMapPairs(std::string_view blob) {
 		// skip end quote
 		index++;
 		return innerString;
-	};
+		};
 
 	while (index < blob.size()) {
-		
+
 		skipWhitespace();
 
 		if (index >= blob.size()) break;
 
 		switch (blob[index]) {
-			case '{':
-				// new entity
-				index++;
-				currentEntity.clear();
-				break;
-			case '}':
-				// end of entity hash pairs
-				index++;
-				processedEntities.push_back(currentEntity);
-				break;
-			case '"':
-				// read key-value pair for entity
-				key = readQuotes();
-				skipWhitespace();
-				value = readQuotes();
-				currentEntity[std::move(key)] = std::move(value);
-				break;
-			default:
-				// advance next character
-				index++;
+		case '{':
+			// new entity
+			index++;
+			currentEntity.clear();
+			break;
+		case '}':
+			// end of entity hash pairs
+			index++;
+			processedEntities.push_back(currentEntity);
+			break;
+		case '"':
+			// read key-value pair for entity
+			key = readQuotes();
+			skipWhitespace();
+			value = readQuotes();
+			currentEntity[std::move(key)] = std::move(value);
+			break;
+		default:
+			// advance next character
+			index++;
 		}
 	}
 
@@ -195,7 +211,7 @@ std::vector<BSPTexture> BSPFile::processTextureLump(std::ifstream& fileStream) {
 
 	// read texture count (header)
 	fileStream.read((char*)&nMipTextures, sizeof(uint32_t));
-	if(!fileStream)
+	if (!fileStream)
 		throw std::runtime_error("failed to read texture lump");
 
 	// read in all offsets of Mipmap Textures
@@ -275,7 +291,7 @@ std::vector<BSPTexture> BSPFile::processTextureLump(std::ifstream& fileStream) {
 		uint32_t mip3Size = (textureParse.nWidth / 8) * (textureParse.nHeight / 8);
 
 		// get offset of palette data
-		uint32_t paletteOffset = textureLump.nOffset + offsets[i]+ textureParse.nOffsets[3] + mip3Size;
+		uint32_t paletteOffset = textureLump.nOffset + offsets[i] + textureParse.nOffsets[3] + mip3Size;
 
 		// skip by 16 bytes (past palatte type specifier) 
 		fileStream.seekg(paletteOffset + sizeof(uint16_t), std::ios::beg);
