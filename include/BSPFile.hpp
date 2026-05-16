@@ -186,6 +186,7 @@ public:
 	// load BSP file from path
 	bool load(const char* path);
 
+	// getters
 	std::span<const BSPFace>        faces()       { return _faces; }
 	std::span<const BSPVertex>      vertices()    { return _vertices; }
 	std::span<const BSPEdge>        edges()       { return _edges; }
@@ -200,8 +201,6 @@ public:
 	
 	// parse required wad files from worldspawn entity
 	std::vector<std::string> requiredWADs();
-
-	void printHeader();
 
 private:
 
