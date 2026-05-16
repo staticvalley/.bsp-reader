@@ -1,5 +1,4 @@
-#include <BSPReader.hpp>
-#include <BSPLumpDefs.hpp>
+#include <BSPFile.hpp>
 
 #include <string>
 #include <fstream>
@@ -8,109 +7,101 @@
 #include <unordered_map>
 #include <vector>
 
-BSPReader::BSPReader(const char* path) 
-	: filePath(path)
-{
+BSPFile::BSPFile() {}
 
-	fileStream = std::ifstream(path, std::ios::binary);
+BSPFile::~BSPFile() {}
+
+bool BSPFile::load(const char* path) {
+	
+	// open .bsp
+	std::ifstream fileStream = std::ifstream(path, std::ios::binary);
 	if (!fileStream.is_open())
-		throw std::runtime_error(std::format("failed to open BSP file: {}", filePath));
+		return false;
 
-	// read in header from file
-	header = processHeader();
-
-	// only reading bsp30 files
-	if (header.nVersion != 30)
-		throw std::runtime_error(std::format("invalid BSP version: {}", header.nVersion));
-}
-
-BSPReader::~BSPReader() {}
-
-void BSPReader::printHeader() {
-
-	auto lumpTypeToString = [&](LumpType lump) {
-		switch (lump) {
-		case ENTITIES:     return "ENTITIES";
-		case PLANES:       return "PLANES";
-		case TEXTURES:     return "TEXTURES";
-		case VERTICES:     return "VERTICES";
-		case VISIBILITY:   return "VISIBILITY";
-		case NODES:        return "NODES";
-		case TEXINFO:      return "TEXINFO";
-		case FACES:        return "FACES";
-		case LIGHTING:     return "LIGHTING";
-		case CLIPNODES:    return "CLIPNODES";
-		case LEAVES:       return "LEAVES";
-		case MARKSURFACES: return "MARKSURFACES";
-		case EDGES:        return "EDGES";
-		case SURFEDGES:    return "SURFEDGES";
-		case MODELS:       return "MODELS";
-		default:           return "NONELUMP";
-		}
-	};
-
-	std::println("filepath: \"{}\" \n.bsp version: {}", filePath, header.nVersion);
-
-	std::println("{:<20} {:<20} {:<20}", "lump type", "lump offset", "lump length");
-	for (int i = 0; i < BSP_LUMP_COUNT; i++) {
-		std::println("{:<20} {:<20} {:<20}", 
-			lumpTypeToString((LumpType)i), 
-			header.lump[i].nOffset, 
-			header.lump[i].nLength
-		);
+	// read header and each lump
+	try {
+		processHeader(fileStream);
+		for(int i = 0; i < BSP_LUMP_COUNT; i++)
+			processLump(fileStream, LumpType(i));
+	} catch (const std::runtime_error& e) {
+		std::println(std::cerr, "BSPFile: failed to load {}: {}", path, e.what());
+		return false;
 	}
+
+	return true;
+
 }
 
-BSPHeader BSPReader::processHeader() {
+void BSPFile::processHeader(std::ifstream& fileStream) {
 
 	BSPHeader newHeader;
 
 	// read and verify BSP version
 	fileStream.read((char*)(&newHeader.nVersion), sizeof(newHeader.nVersion));
-
-	if (!fileStream) {
-		std::cerr << "error reading BSP version" << std::endl;
-		return {};
-	}
+	if (!fileStream)
+		throw std::runtime_error("failed to read header bsp version");
 
 	// read in lump information
 	fileStream.read((char*)(newHeader.lump), sizeof(BSPLump) * BSP_LUMP_COUNT);
-
-	if (!fileStream) {
-		std::cerr << "error reading lump table" << std::endl;
-		return {};
-	}
+	if (!fileStream)
+		throw std::runtime_error("failed to read header lump information");
 	
-	return newHeader;
+	header = std::move(newHeader);
 }
 
-void BSPReader::processAllLumps() {
-	for (int i = 0; i < BSP_LUMP_COUNT; i++)
-		processLump((LumpType)i);
-}
-
-void BSPReader::processLump(LumpType lump) {
+void BSPFile::processLump(std::ifstream& fileStream, LumpType lump) {
 	switch (lump) {
-	case ENTITIES:		entities = processEntityLump(); break;
-	case PLANES:		planes = processBinaryLump<BSPPlane>(lump); break;
-	case TEXTURES:		textures = processTextureLump(); break;
-	case VERTICES:		vertices = processBinaryLump<BSPVertex>(lump); break;
-	case VISIBILITY:	break; // note: unimplemented
-	case NODES:			nodes = processBinaryLump<BSPNode>(lump); break;
-	case TEXINFO:		textureInfo = processBinaryLump<BSPTextureInfo>(lump); break;
-	case FACES:			faces = processBinaryLump<BSPFace>(lump); break;
-	case LIGHTING:		lightMap = processBinaryLump<uint8_t>(lump); break;
-	case CLIPNODES:		clipNodes = processBinaryLump<BSPClipNode>(lump); break;
-	case LEAVES:		leaves = processBinaryLump<BSPLeaf>(lump); break;
-	case MARKSURFACES:	markSurfaces = processBinaryLump<BSPMarkSurface>(lump); break;
-	case EDGES:			edges = processBinaryLump<BSPEdge>(lump); break;
-	case SURFEDGES:		surfEdges = processBinaryLump<BSPSurfEdge>(lump); break;
-	case MODELS:		models = processBinaryLump<BSPModel>(lump); break;
+	case ENTITIES:		_entities		= processEntityLump(fileStream); break;
+	case PLANES:		_planes			= processBinaryLump<BSPPlane>(fileStream, lump); break;
+	case TEXTURES:		_textures		= processTextureLump(fileStream); break;
+	case VERTICES:		_vertices		= processBinaryLump<BSPVertex>(fileStream, lump); break;
+	case VISIBILITY:	break;			// note: unimplemented
+	case NODES:			_nodes			= processBinaryLump<BSPNode>(fileStream, lump); break;
+	case TEXINFO:		_textureInfo	= processBinaryLump<BSPTextureInfo>(fileStream, lump); break;
+	case FACES:			_faces			= processBinaryLump<BSPFace>(fileStream, lump); break;
+	case LIGHTING:		_lightMap		= processBinaryLump<uint8_t>(fileStream, lump); break;
+	case CLIPNODES:		_clipNodes		= processBinaryLump<BSPClipNode>(fileStream, lump); break;
+	case LEAVES:		_leaves			= processBinaryLump<BSPLeaf>(fileStream, lump); break;
+	case MARKSURFACES:	_markSurfaces	= processBinaryLump<BSPMarkSurface>(fileStream, lump); break;
+	case EDGES:			_edges			= processBinaryLump<BSPEdge>(fileStream, lump); break;
+	case SURFEDGES:		_surfEdges		= processBinaryLump<BSPSurfEdge>(fileStream, lump); break;
+	case MODELS:		_models			= processBinaryLump<BSPModel>(fileStream, lump); break;
 	default:			break;
 	}
 }
 
-std::vector<BSPEntity> BSPReader::processEntityLump() {
+std::vector<std::string> BSPFile::requiredWADs() {
+	
+	// make a vector of split strings from a string at the delimiter
+	const auto split = [](const std::string& s, const std::string& delim) -> std::vector<std::string> {
+		size_t start = 0;
+		size_t end;
+		const size_t delim_length = delim.length();
+
+		std::string token;
+		std::vector<std::string> splitResults;
+
+		while ((end = s.find(delim, start)) != std::string::npos) {
+			token = s.substr(start, end - start);
+			start = end + delim_length;
+			splitResults.push_back(token);
+		}
+
+		splitResults.push_back(s.substr(start));
+		return splitResults;
+	};
+
+	for (const BSPEntity& entity : _entities) {
+		if (entity.count("classname") && entity["classname"] == "worldspawn")
+			if (entity.count("wad"))
+				return split(entity["wad"], ";");
+	}
+
+	// worldspawn not found
+	return {};
+}
+
+std::vector<BSPEntity> BSPFile::processEntityLump(std::ifstream& fileStream) {
 
 	// get lump data (offset and length)
 	const BSPLump& entityLump = header.lump[LumpType::ENTITIES];
@@ -127,7 +118,7 @@ std::vector<BSPEntity> BSPReader::processEntityLump() {
 	return parseEntityMapPairs(entityBlob);
 }
 
-std::vector<BSPEntity> BSPReader::parseEntityMapPairs(std::string_view blob) {
+std::vector<BSPEntity> BSPFile::parseEntityMapPairs(std::string_view blob) {
 	
 	std::vector<BSPEntity> processedEntities;
 	BSPEntity currentEntity;
@@ -185,7 +176,7 @@ std::vector<BSPEntity> BSPReader::parseEntityMapPairs(std::string_view blob) {
 	return processedEntities;
 }
 
-std::vector<BSPTexture> BSPReader::processTextureLump() {
+std::vector<BSPTexture> BSPFile::processTextureLump(std::ifstream& fileStream) {
 
 	// holds number of mipmap textures
 	uint32_t nMipTextures = 0;

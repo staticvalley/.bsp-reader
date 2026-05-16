@@ -1,9 +1,20 @@
 #pragma once
 
-#include <unordered_map>
+#include <fstream>
+#include <iostream>
+
+#include <cstdint>
 #include <string>
-#include <array>
+#include <unordered_map>
 #include <vector>
+#include <span>
+#include <array>
+
+/*
+	using this as my guide:
+	https://developer.valvesoftware.com/wiki/BSP_(GoldSrc)
+*/
+
 
 #define BSP_LUMP_COUNT 15
 
@@ -158,4 +169,90 @@ struct BSPModel {
 	int32_t iHeadnodes[BSP_MAX_MAP_HULLS];	// index into nodes array
 	int32_t nVisLeafs;						// ???
 	int32_t iFirstFace, nFaces;				// index and count into faces
+};
+
+class BSPFile {
+public:
+
+	BSPFile();
+	~BSPFile();
+
+	// only moves, no copies
+	BSPFile(BSPFile&&) = default;
+	BSPFile& operator=(BSPFile&&) = default;
+	BSPFile(const BSPFile&) = delete;
+	BSPFile& operator=(const BSPFile&) = delete;
+	
+	// load BSP file from path
+	bool load(const char* path);
+
+	std::span<const BSPFace>        faces()       { return _faces; }
+	std::span<const BSPVertex>      vertices()    { return _vertices; }
+	std::span<const BSPEdge>        edges()       { return _edges; }
+	std::span<const BSPSurfEdge>    surfEdges()   { return _surfEdges; }
+	std::span<const BSPTexture>     textures()    { return _textures; }
+	std::span<const BSPTextureInfo> textureInfo() { return _textureInfo; }
+	std::span<const BSPLeaf>        leaves()      { return _leaves; }
+	std::span<const BSPNode>        nodes()       { return _nodes; }
+	std::span<const BSPModel>       models()      { return _models; }
+	std::span<const BSPEntity>      entities()    { return _entities; }
+	std::span<const uint8_t>        lightmap()    { return _lightMap; }
+	
+	// parse required wad files from worldspawn entity
+	std::vector<std::string> requiredWADs();
+
+	void printHeader();
+
+private:
+
+	BSPHeader header{};
+
+	// lumps
+	std::vector<BSPEntity>		_entities;
+	std::vector<BSPPlane>		_planes;
+	std::vector<BSPTexture>		_textures;
+	std::vector<BSPVertex>		_vertices;
+	std::vector<BSPNode>		_nodes;
+	std::vector<BSPTextureInfo> _textureInfo;
+	std::vector<BSPFace>		_faces;
+	std::vector<uint8_t>		_lightMap;
+	std::vector<BSPClipNode>	_clipNodes;
+	std::vector<BSPLeaf>		_leaves;
+	std::vector<BSPMarkSurface> _markSurfaces;
+	std::vector<BSPEdge>		_edges;
+	std::vector<BSPSurfEdge>	_surfEdges;
+	std::vector<BSPModel>		_models;
+	
+	// parse BSP version and lump table data into header struct
+	void processHeader(std::ifstream& fileStream);
+
+	void processLump(std::ifstream& fileStream, LumpType lump);
+
+	// special reader for entity lump (ascii)
+	std::vector<BSPEntity> processEntityLump(std::ifstream& fileStream);
+
+	// helper function for processEntityLump(), parses ascii for entity key-value pairs
+	std::vector<BSPEntity> parseEntityMapPairs(std::string_view blob);
+
+	// special reader for texture lump
+	std::vector<BSPTexture> processTextureLump(std::ifstream& fileStream);
+
+	// generic reader for all other lump types
+	template<typename T>
+	std::vector<T> processBinaryLump(std::ifstream& fileStream, LumpType type) {
+
+		// get lump data (offset and length)
+		const BSPLump& binaryLump = header.lump[type];
+
+		// create vector of type
+		std::vector<T> lumpData(binaryLump.nLength / sizeof(T));
+
+		// read in types into vector
+		fileStream.seekg(binaryLump.nOffset, std::ios::beg);
+		fileStream.read((char*)lumpData.data(), binaryLump.nLength);
+		if (!fileStream)
+			throw std::runtime_error("failed to read lump");
+
+		return lumpData;
+	}
 };

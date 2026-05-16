@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(bspReader LANGUAGES C CXX)
+project(BSPFile LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
-    src/BSPReader.cpp
+    "src/BSPFile.cpp"
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
